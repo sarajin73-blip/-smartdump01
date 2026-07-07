@@ -1,0 +1,901 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Truck, 
+  Scale, 
+  AlertTriangle, 
+  Car, 
+  Key, 
+  Plus, 
+  Printer, 
+  Camera, 
+  FileText, 
+  CheckCircle2, 
+  RefreshCw, 
+  Trash2, 
+  Search, 
+  X,
+  TrendingUp,
+  Sparkles,
+  ArrowRightLeft
+} from 'lucide-react';
+
+export default function App() {
+  // --- STATE MANAGEMENT ---
+  // 운행 기록 일지 목록 (초기 모의 데이터 3개 장착)
+  const [logs, setLogs] = useState([
+    {
+      id: 1,
+      time: '10:15:32',
+      plateNumber: '서울 86바 4921',
+      plateImg: 'https://images.unsplash.com/photo-1551524559-8af4e6624178?auto=format&fit=crop&q=80&w=200', // 임시 번호판 대용 차량
+      invoiceImg: 'https://images.unsplash.com/photo-1586075010923-2dd45e9b2d4f?auto=format&fit=crop&q=80&w=200', // 영수증/송장 대용
+      invoiceAttached: true,
+      weight: 25.5,
+      material: '사토 (모래 흙)',
+      driverName: '김태수',
+      status: '정상출차'
+    },
+    {
+      id: 2,
+      time: '11:02:15',
+      plateNumber: '경기 92러 8104',
+      plateImg: 'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?auto=format&fit=crop&q=80&w=200',
+      invoiceImg: null, // 송장 미부착
+      invoiceAttached: false,
+      weight: 24.0,
+      material: '폐토사',
+      driverName: '박창호',
+      status: '송장누락'
+    },
+    {
+      id: 3,
+      time: '11:45:00',
+      plateNumber: '인천 77아 1290',
+      plateImg: 'https://images.unsplash.com/photo-1592838064575-70ed626d3a44?auto=format&fit=crop&q=80&w=200',
+      invoiceImg: 'https://images.unsplash.com/photo-1586075010923-2dd45e9b2d4f?auto=format&fit=crop&q=80&w=200',
+      invoiceAttached: true,
+      weight: 26.8,
+      material: '사토 (자갈)',
+      driverName: '이진욱',
+      status: '정상출차'
+    }
+  ]);
+
+  // 등록된 고유 차량 목록 (기본 차량 DB 역할)
+  const [registeredPlates, setRegisteredPlates] = useState([
+    '서울 86바 4921', '경기 92러 8104', '인천 77아 1290', '경기 83러 5521', '부산 98바 3302'
+  ]);
+
+  // ANPR 실시간 진입 시뮬레이터 상태
+  const [simStep, setSimStep] = useState(0); // 0: 대기, 1: 차량감지, 2: 번호판스캔, 3: 송장분석, 4: 등록완료
+  const [simDetails, setSimDetails] = useState(null);
+  const [isSimulating, setIsSimulating] = useState(false);
+
+  // 수동/간편 추가 폼 상태
+  const [formData, setFormData] = useState({
+    plateNumber: '',
+    weight: '24.0',
+    driverName: '',
+    invoiceAttached: true,
+    material: '사토 (일반토)'
+  });
+
+  // 검색 및 필터 필드
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterInvoice, setFilterInvoice] = useState('ALL'); // ALL, ATTACHED, MISSING
+
+  // 선택된 로그 (인쇄용)
+  const [selectedLogs, setSelectedLogs] = useState([]);
+  // 출력 인쇄용 모달 팝업 여부
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+
+  // 시뮬레이션용 가상 데이터셋
+  const mockVehicles = [
+    { plate: '경기 83러 5521', driver: '최민성', weight: 25.2, material: '사토 (모래 흙)', invoice: true, imgUrl: 'https://images.unsplash.com/photo-1516576880881-140175463b23?auto=format&fit=crop&q=80&w=300' },
+    { plate: '강원 90가 1123', driver: '정우성', weight: 23.5, material: '폐토사', invoice: false, imgUrl: 'https://images.unsplash.com/photo-1519003722824-194d4455a60c?auto=format&fit=crop&q=80&w=300' },
+    { plate: '부산 98바 3302', driver: '한지만', weight: 27.1, material: '사토 (암석자갈)', invoice: true, imgUrl: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&q=80&w=300' },
+    { plate: '경기 88더 7789', driver: '홍길동', weight: 24.8, material: '폐토사', invoice: true, imgUrl: 'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?auto=format&fit=crop&q=80&w=300' }
+  ];
+
+  // --- AUTO CALCULATIONS ---
+  const todayExportRounds = logs.length; // 오늘 반출 회수
+  const cumulativeTons = logs.reduce((sum, log) => sum + parseFloat(log.weight || 0), 0).toFixed(1); // 누적 반출 총량
+  const missingInvoiceCount = logs.filter(log => !log.invoiceAttached).length; // 송장 미부착 건수
+  const registeredCount = registeredPlates.length; // 등록 차량 대수
+
+  // --- FUNCTIONS ---
+  // ANPR 차량 진입 시뮬레이션 실행 함수
+  const triggerANPRSimulation = () => {
+    if (isSimulating) return;
+    setIsSimulating(true);
+    setSimStep(1);
+
+    // 무작위 모의 트럭 데이터 선택
+    const randomVehicle = mockVehicles[Math.floor(Math.random() * mockVehicles.length)];
+    setSimDetails(randomVehicle);
+
+    // 파이프라인 단계별 연출 (setTimeout 활용)
+    setTimeout(() => {
+      setSimStep(2); // 2단계: 번호판 OCR 스캔
+    }, 1500);
+
+    setTimeout(() => {
+      setSimStep(3); // 3단계: 적재 송장 분석
+    }, 3000);
+
+    setTimeout(() => {
+      setSimStep(4); // 4단계: 실시간 데이터베이스 자동 등록 완료
+      // 신규 로그에 추가 연산 자동 처리
+      const now = new Date();
+      const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+      
+      const newLog = {
+        id: Date.now(),
+        time: timeStr,
+        plateNumber: randomVehicle.plate,
+        plateImg: randomVehicle.imgUrl,
+        invoiceImg: randomVehicle.invoice ? 'https://images.unsplash.com/photo-1586075010923-2dd45e9b2d4f?auto=format&fit=crop&q=80&w=200' : null,
+        invoiceAttached: randomVehicle.invoice,
+        weight: randomVehicle.weight,
+        material: randomVehicle.material,
+        driverName: randomVehicle.driver,
+        status: randomVehicle.invoice ? '정상출차' : '송장누락'
+      };
+
+      setLogs(prev => [newLog, ...prev]);
+
+      // 새로운 번호판일 경우 고유 등록 차량 리스트에도 자동 가입 연산
+      if (!registeredPlates.includes(randomVehicle.plate)) {
+        setRegisteredPlates(prev => [...prev, randomVehicle.plate]);
+      }
+    }, 4500);
+
+    setTimeout(() => {
+      setSimStep(0);
+      setIsSimulating(false);
+      setSimDetails(null);
+    }, 6500);
+  };
+
+  // 수동 간편 간편출차 등록
+  const handleManualSubmit = (e) => {
+    e.preventDefault();
+    if (!formData.plateNumber.trim()) return;
+
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+
+    const newLog = {
+      id: Date.now(),
+      time: timeStr,
+      plateNumber: formData.plateNumber,
+      plateImg: 'https://images.unsplash.com/photo-1592838064575-70ed626d3a44?auto=format&fit=crop&q=80&w=200', // 디폴트 이미지
+      invoiceImg: formData.invoiceAttached ? 'https://images.unsplash.com/photo-1586075010923-2dd45e9b2d4f?auto=format&fit=crop&q=80&w=200' : null,
+      invoiceAttached: formData.invoiceAttached,
+      weight: parseFloat(formData.weight) || 24.0,
+      material: formData.material,
+      driverName: formData.driverName || '임시 운전자',
+      status: formData.invoiceAttached ? '정상출차' : '송장누락'
+    };
+
+    setLogs(prev => [newLog, ...prev]);
+    if (!registeredPlates.includes(formData.plateNumber)) {
+      setRegisteredPlates(prev => [...prev, formData.plateNumber]);
+    }
+
+    // 폼 클리어
+    setFormData({
+      plateNumber: '',
+      weight: '24.0',
+      driverName: '',
+      invoiceAttached: true,
+      material: '사토 (일반토)'
+    });
+  };
+
+  // 행 항목 삭제
+  const handleDeleteLog = (id) => {
+    setLogs(prev => prev.filter(log => log.id !== id));
+  };
+
+  // 다중 인쇄 선택 토글
+  const handleSelectLog = (id) => {
+    if (selectedLogs.includes(id)) {
+      setSelectedLogs(prev => prev.filter(item => item !== id));
+    } else {
+      setSelectedLogs(prev => [...prev, id]);
+    }
+  };
+
+  const handleSelectAll = () => {
+    if (selectedLogs.length === filteredLogs.length) {
+      setSelectedLogs([]);
+    } else {
+      setSelectedLogs(filteredLogs.map(l => l.id));
+    }
+  };
+
+  // 모의 가상 파일 첨부 및 자동 OCR 인식 연산기능
+  const triggerMockFileOCR = (type) => {
+    const randomIdx = Math.floor(Math.random() * mockVehicles.length);
+    const mockData = mockVehicles[randomIdx];
+    
+    if (type === 'PLATE') {
+      setFormData(prev => ({
+        ...prev,
+        plateNumber: mockData.plate,
+        driverName: mockData.driver
+      }));
+    } else if (type === 'INVOICE') {
+      setFormData(prev => ({
+        ...prev,
+        invoiceAttached: true,
+        weight: mockData.weight.toString()
+      }));
+    }
+  };
+
+  // 필터링된 기록 일지
+  const filteredLogs = logs.filter(log => {
+    const matchesSearch = log.plateNumber.includes(searchQuery) || log.driverName.includes(searchQuery) || log.material.includes(searchQuery);
+    if (filterInvoice === 'ALL') return matchesSearch;
+    if (filterInvoice === 'ATTACHED') return matchesSearch && log.invoiceAttached;
+    if (filterInvoice === 'MISSING') return matchesSearch && !log.invoiceAttached;
+    return matchesSearch;
+  });
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
+      {/* --- TOP HEADER --- */}
+      <header className="sticky top-0 z-40 bg-white border-b border-slate-200 px-4 py-3 shadow-sm">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="w-12 h-12 bg-[#fca215] rounded-2xl flex items-center justify-center text-white shadow-md shadow-amber-500/10">
+              <Truck className="w-6 h-6 stroke-[2.5]" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h1 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight">사토 반출 스마트 대장</h1>
+                <span className="hidden sm:inline-block bg-[#fdf5eb] text-[#f49300] border border-[#fce9d0] px-2.5 py-0.5 rounded-full text-xs font-bold">
+                  출차 통제 전용
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 font-medium">Smart ANPR & Vehicle Logs Control System</p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <button className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition duration-150">
+              <Key className="w-5 h-5" />
+            </button>
+            <div className="hidden md:block text-right">
+              <p className="text-xs text-slate-400 font-semibold">관리 주체</p>
+              <p className="text-sm font-bold text-slate-700">현장 스마트 통제실</p>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
+        
+        {/* =========================================================
+            상단 현황판 대시보드
+           ========================================================= */}
+        <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          
+          {/* Card 1: 오늘 반출 회수 */}
+          <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 relative overflow-hidden flex flex-col justify-between h-[160px] md:h-[180px]">
+            <div className="flex items-start justify-between">
+              <span className="text-sm md:text-base font-bold text-slate-500 tracking-tight">오늘 반출 회수</span>
+              <div className="w-10 h-10 bg-[#fef5eb] rounded-xl flex items-center justify-center text-[#fca215]">
+                <svg className="w-6 h-6 stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+              </div>
+            </div>
+            <div className="mb-2">
+              <span className="text-3xl md:text-5xl font-black text-slate-900">{todayExportRounds}</span>
+              <span className="text-lg md:text-xl font-bold text-slate-500 ml-1.5">회</span>
+            </div>
+            <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-[#fca215]" />
+          </div>
+
+          {/* Card 2: 누적 반출 총량 */}
+          <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 relative overflow-hidden flex flex-col justify-between h-[160px] md:h-[180px]">
+            <div className="flex items-start justify-between">
+              <span className="text-sm md:text-base font-bold text-slate-500 tracking-tight">누적 반출 총량</span>
+              <div className="w-10 h-10 bg-[#e8f8f2] rounded-xl flex items-center justify-center text-[#0fc58a]">
+                <Scale className="w-6 h-6 stroke-[2.5]" />
+              </div>
+            </div>
+            <div className="mb-2">
+              <span className="text-3xl md:text-5xl font-black text-slate-900">{cumulativeTons}</span>
+              <span className="text-lg md:text-xl font-bold text-slate-500 ml-1.5">톤</span>
+            </div>
+            <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-[#0fc58a]" />
+          </div>
+
+          {/* Card 3: 송장 미부착 건 */}
+          <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 relative overflow-hidden flex flex-col justify-between h-[160px] md:h-[180px]">
+            <div className="flex items-start justify-between">
+              <span className="text-sm md:text-base font-bold text-slate-500 tracking-tight">송장 미부착 건</span>
+              <div className="w-10 h-10 bg-[#fdf2f2] rounded-xl flex items-center justify-center text-[#f05252]">
+                <AlertTriangle className="w-6 h-6 stroke-[2.5]" />
+              </div>
+            </div>
+            <div className="mb-2">
+              <span className={`text-3xl md:text-5xl font-black ${missingInvoiceCount > 0 ? 'text-[#f05252]' : 'text-slate-900'}`}>{missingInvoiceCount}</span>
+              <span className="text-lg md:text-xl font-bold text-slate-500 ml-1.5">건</span>
+            </div>
+            <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-[#f05252]" />
+          </div>
+
+          {/* Card 4: 등록 차량 대수 */}
+          <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 relative overflow-hidden flex flex-col justify-between h-[160px] md:h-[180px]">
+            <div className="flex items-start justify-between">
+              <span className="text-sm md:text-base font-bold text-slate-500 tracking-tight">등록 차량 대수</span>
+              <div className="w-10 h-10 bg-[#eff6ff] rounded-xl flex items-center justify-center text-[#3f83f8]">
+                <Car className="w-6 h-6 stroke-[2.5]" />
+              </div>
+            </div>
+            <div className="mb-2">
+              <span className="text-3xl md:text-5xl font-black text-slate-900">{registeredCount}</span>
+              <span className="text-lg md:text-xl font-bold text-slate-500 ml-1.5">대</span>
+            </div>
+            <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-[#3f83f8]" />
+          </div>
+
+        </section>
+
+        {/* =========================================================
+            중단: ANPR 차량진입 시뮬레이션 및 간편 신속등록 기어박스
+           ========================================================= */}
+        <section className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          
+          {/* ANPR 실시간 인식 시뮬레이터 (진입용) */}
+          <div className="lg:col-span-7 bg-white rounded-3xl p-6 shadow-sm border border-slate-100 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center space-x-2">
+                  <div className="w-2.5 h-2.5 bg-rose-500 rounded-full animate-ping" />
+                  <h3 className="text-lg font-black text-slate-900">현장 진입용 ANPR 카메라 시뮬레이터</h3>
+                </div>
+                <span className="text-xs font-semibold text-slate-400">지능형 딥러닝 연동</span>
+              </div>
+
+              {/* 시뮬레이션 인터랙티브 박스 */}
+              <div className="bg-slate-950 rounded-2xl p-5 relative overflow-hidden min-h-[220px] flex flex-col justify-between text-white shadow-inner">
+                <div className="absolute inset-0 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px] opacity-30" />
+                
+                {simStep === 0 && (
+                  <div className="my-auto text-center relative z-10 space-y-4">
+                    <div className="w-16 h-16 bg-slate-900 rounded-full border border-slate-800 flex items-center justify-center mx-auto text-slate-400">
+                      <Camera className="w-8 h-8 animate-pulse text-amber-500" />
+                    </div>
+                    <div>
+                      <h4 className="text-base font-bold">덤프트럭 진입 대기 상태</h4>
+                      <p className="text-xs text-slate-400 mt-1">카메라 렌즈 및 인공지능 모듈이 진입로를 모니터링 중입니다.</p>
+                    </div>
+                  </div>
+                )}
+
+                {simStep > 0 && simDetails && (
+                  <div className="relative z-10 w-full h-full flex flex-col justify-between space-y-4">
+                    <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4">
+                      <div className="relative w-28 h-20 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 shrink-0">
+                        <img src={simDetails.imgUrl} className="w-full h-full object-cover" alt="Simulated truck" />
+                        <div className="absolute inset-0 border-2 border-[#fca215] animate-pulse" />
+                        <span className="absolute bottom-1 right-1 bg-black/70 px-1 py-0.5 text-[9px] text-white">CH-01</span>
+                      </div>
+
+                      <div className="text-center sm:text-left flex-1 space-y-1">
+                        <span className="bg-amber-500 text-slate-950 font-bold px-2 py-0.5 rounded text-[10px] tracking-wider">
+                          {simStep === 1 && 'STEP 01: 트럭 진입 감지'}
+                          {simStep === 2 && 'STEP 02: 인공지능 번호판 판독'}
+                          {simStep === 3 && 'STEP 03: 적재 송장 분석 중'}
+                          {simStep === 4 && 'SUCCESS: 데이터베이스 즉시 기록'}
+                        </span>
+                        
+                        <div className="mt-1">
+                          <p className="text-xs text-slate-400">검출 운전자 : <strong className="text-white">{simDetails.driver}</strong></p>
+                          <p className="text-xs text-slate-400">예측 중량 : <strong className="text-white">{simDetails.weight} 톤</strong></p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-xs text-slate-400 font-bold">
+                        <span className={simStep >= 1 ? 'text-[#fca215]' : ''}>감지 완료</span>
+                        <span className={simStep >= 2 ? 'text-[#fca215]' : ''}>OCR 추출</span>
+                        <span className={simStep >= 3 ? 'text-[#fca215]' : ''}>송장 판별</span>
+                        <span className={simStep >= 4 ? 'text-[#0fc58a]' : ''}>DB 등록</span>
+                      </div>
+                      <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full transition-all duration-500 ease-out ${simStep === 4 ? 'bg-[#0fc58a]' : 'bg-[#fca215]'}`}
+                          style={{ width: `${(simStep / 4) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <button
+                onClick={triggerANPRSimulation}
+                disabled={isSimulating}
+                className={`w-full py-3.5 px-6 rounded-2xl font-bold flex items-center justify-center space-x-2 shadow-lg transition duration-200 ${
+                  isSimulating 
+                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed' 
+                  : 'bg-gradient-to-r from-slate-900 to-slate-800 hover:from-amber-600 hover:to-amber-500 text-white shadow-slate-900/10'
+                }`}
+              >
+                {isSimulating ? (
+                  <>
+                    <RefreshCw className="w-5 h-5 animate-spin text-amber-500" />
+                    <span>실시간 OCR 및 송장 판독 처리 중...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-5 h-5 text-amber-400" />
+                    <span>덤프트럭 진입 시뮬레이션 (ANPR 가동)</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* 수동 간편 간편출차 관리 폼 */}
+          <div className="lg:col-span-5 bg-white rounded-3xl p-6 shadow-sm border border-slate-100 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-black text-slate-900">수동 보완 등록</h3>
+                <span className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded font-bold">오류 건 사후등록</span>
+              </div>
+
+              <form onSubmit={handleManualSubmit} className="space-y-3.5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">차량 번호판</label>
+                  <div className="flex space-x-1.5">
+                    <input 
+                      type="text"
+                      placeholder="예) 경기 86바 4921"
+                      value={formData.plateNumber}
+                      onChange={(e) => setFormData({...formData, plateNumber: e.target.value})}
+                      className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-800 focus:outline-none focus:border-[#fca215] focus:bg-white"
+                    />
+                    <button 
+                      type="button"
+                      onClick={() => triggerMockFileOCR('PLATE')}
+                      className="bg-amber-50 hover:bg-amber-100 border border-amber-200 text-[#fca215] px-2.5 rounded-xl text-xs font-bold flex items-center space-x-1"
+                      title="OCR 이미지 판독 시뮬레이션"
+                    >
+                      <Camera className="w-4 h-4" />
+                      <span>OCR</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-1">운전자 성명</label>
+                    <input 
+                      type="text"
+                      placeholder="홍길동"
+                      value={formData.driverName}
+                      onChange={(e) => setFormData({...formData, driverName: e.target.value})}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:border-[#fca215] focus:bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-1">반출 성상</label>
+                    <select
+                      value={formData.material}
+                      onChange={(e) => setFormData({...formData, material: e.target.value})}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:border-[#fca215] focus:bg-white"
+                    >
+                      <option value="사토 (일반토)">사토 (일반토)</option>
+                      <option value="사토 (모래)">사토 (모래)</option>
+                      <option value="폐토사">폐토사</option>
+                      <option value="사토 (암석자갈)">사토 (암석자갈)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 items-center">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-1">톤수 (중량)</label>
+                    <div className="flex space-x-1.5">
+                      <input 
+                        type="number"
+                        step="0.1"
+                        value={formData.weight}
+                        onChange={(e) => setFormData({...formData, weight: e.target.value})}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-800 focus:outline-none focus:border-[#fca215]"
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => triggerMockFileOCR('INVOICE')}
+                        className="bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-600 px-2 rounded-xl text-xs font-bold flex items-center"
+                        title="송장 스캔 자동완성"
+                      >
+                        <FileText className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="block text-xs font-bold text-slate-400 mb-1.5">실물 송장 확보</span>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={formData.invoiceAttached}
+                        onChange={(e) => setFormData({...formData, invoiceAttached: e.target.checked})}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#0fc58a]"></div>
+                      <span className="ml-2 text-xs font-bold text-slate-600">
+                        {formData.invoiceAttached ? '부착 완료' : '미부착 상태'}
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center space-x-1 transition duration-150"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>수동 보완 기재 등록</span>
+                </button>
+              </form>
+            </div>
+          </div>
+
+        </section>
+
+        {/* =========================================================
+            하단: 덤프트럭 간편 운행일지 시트 (가로 스크롤 강화 적용)
+           ========================================================= */}
+        <section className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+          
+          {/* 필터 및 검색 바 */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between pb-6 border-b border-slate-100 gap-4">
+            <div>
+              <h2 className="text-lg font-black text-slate-900 flex items-center space-x-2">
+                <span>덤프트럭 간편 운행기록부</span>
+                <span className="bg-slate-100 text-slate-600 text-xs px-2.5 py-0.5 rounded-full font-bold">
+                  {filteredLogs.length}건 검색됨
+                </span>
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">ANPR 및 수동 등록이 결합된 운행 대장 데이터베이스</p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <div className="bg-slate-100 p-1 rounded-xl flex">
+                <button 
+                  onClick={() => setFilterInvoice('ALL')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition ${filterInvoice === 'ALL' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  전체보기
+                </button>
+                <button 
+                  onClick={() => setFilterInvoice('ATTACHED')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition ${filterInvoice === 'ATTACHED' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  송장 확인
+                </button>
+                <button 
+                  onClick={() => setFilterInvoice('MISSING')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition ${filterInvoice === 'MISSING' ? 'bg-white text-rose-500 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  송장 미부착
+                </button>
+              </div>
+
+              <div className="relative">
+                <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                <input 
+                  type="text" 
+                  placeholder="차량번호 / 운전자 검색"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full sm:w-60 bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs font-bold text-slate-700 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* 모바일 화면 가로 스크롤 유도 인디케이터 (사용자 친화적 피드백) */}
+          <div className="flex md:hidden items-center justify-end space-x-1.5 py-2.5 text-xs text-slate-400 font-semibold border-b border-slate-50">
+            <ArrowRightLeft className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+            <span>표를 좌우로 밀어서 전체 내용을 확인하세요.</span>
+          </div>
+
+          {/* 가로 스크롤 강화 컨테이너: overflow-x-auto, 맞춤형 스크롤바 스타일링 */}
+          <div className="overflow-x-auto w-full rounded-2xl border border-slate-100 mt-4 custom-scrollbar">
+            <table className="w-full text-left border-collapse min-w-[900px]">
+              <thead>
+                <tr className="bg-slate-50 text-slate-500 text-xs font-bold uppercase tracking-wider border-b border-slate-100">
+                  <th className="py-4 px-4 w-12 text-center sticky left-0 bg-slate-50 z-10">
+                    <input 
+                      type="checkbox" 
+                      className="rounded text-amber-500 focus:ring-amber-400"
+                      checked={selectedLogs.length > 0 && selectedLogs.length === filteredLogs.length}
+                      onChange={handleSelectAll}
+                    />
+                  </th>
+                  <th className="py-4 px-3 w-28">검출시간</th>
+                  <th className="py-4 px-4 w-40">차량번호</th>
+                  <th className="py-4 px-4 w-36">OCR 번호판 사진</th>
+                  <th className="py-4 px-4 w-36">송장/출차 이미지</th>
+                  <th className="py-4 px-4 w-32">운전자</th>
+                  <th className="py-4 px-4 w-28 text-right">중량(톤)</th>
+                  <th className="py-4 px-4 w-36">반출 성상</th>
+                  <th className="py-4 px-4 w-32 text-center">상태</th>
+                  <th className="py-4 px-4 w-24 text-center">관리</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-sm">
+                {filteredLogs.length === 0 ? (
+                  <tr>
+                    <td colSpan="10" className="py-12 text-center text-slate-400 font-medium">
+                      일치하는 운행 기록 정보가 존재하지 않습니다.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredLogs.map((log) => (
+                    <tr key={log.id} className="hover:bg-slate-50/50 transition">
+                      {/* 체크박스 - sticky를 적용하여 가로스크롤 시에도 고정되도록 디자인 레이어 설계 */}
+                      <td className="py-4 px-4 text-center sticky left-0 bg-white hover:bg-slate-50/50 z-10 border-r border-slate-100/55">
+                        <input 
+                          type="checkbox" 
+                          checked={selectedLogs.includes(log.id)}
+                          onChange={() => handleSelectLog(log.id)}
+                          className="rounded text-[#fca215] focus:ring-amber-400"
+                        />
+                      </td>
+
+                      {/* 검출시간 */}
+                      <td className="py-4 px-3 text-slate-500 font-mono font-semibold text-xs">
+                        {log.time}
+                      </td>
+
+                      {/* 번호판 텍스트 */}
+                      <td className="py-4 px-4">
+                        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 font-black px-2.5 py-1 rounded text-center tracking-tight text-xs inline-block">
+                          {log.plateNumber}
+                        </div>
+                      </td>
+
+                      {/* OCR 번호판 사진 첨부 */}
+                      <td className="py-4 px-4">
+                        <div className="relative group w-16 h-10 rounded border border-slate-200 bg-slate-100 overflow-hidden cursor-zoom-in">
+                          <img src={log.plateImg} alt="Plate camera" className="w-full h-full object-cover group-hover:scale-110 transition" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                            <Camera className="w-4 h-4 text-white" />
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* 송장/출차 이미지 첨부 */}
+                      <td className="py-4 px-4">
+                        {log.invoiceAttached ? (
+                          <div className="relative group w-16 h-10 rounded border border-slate-200 bg-slate-100 overflow-hidden cursor-zoom-in">
+                            <img src={log.invoiceImg} alt="Invoice Scan" className="w-full h-full object-cover group-hover:scale-110 transition" />
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                              <FileText className="w-4 h-4 text-white" />
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="w-16 h-10 rounded border border-dashed border-rose-200 bg-rose-50 flex items-center justify-center text-rose-500" title="송장 누락 상태">
+                            <AlertTriangle className="w-4 h-4" />
+                          </div>
+                        )}
+                      </td>
+
+                      {/* 운전자 */}
+                      <td className="py-4 px-4 font-bold text-slate-700">
+                        {log.driverName}
+                      </td>
+
+                      {/* 중량 (톤) */}
+                      <td className="py-4 px-4 font-mono font-bold text-right text-slate-900">
+                        {log.weight.toFixed(1)} <span className="text-xs text-slate-400">T</span>
+                      </td>
+
+                      {/* 반출성상 */}
+                      <td className="py-4 px-4 text-xs font-semibold text-slate-500">
+                        {log.material}
+                      </td>
+
+                      {/* 상태 뱃지 */}
+                      <td className="py-4 px-4 text-center">
+                        <span className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                          log.invoiceAttached 
+                            ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' 
+                            : 'bg-rose-50 text-rose-500 border border-rose-100'
+                        }`}>
+                          {log.invoiceAttached ? (
+                            <>
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>정상 완료</span>
+                            </>
+                          ) : (
+                            <>
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                              <span>송장 경고</span>
+                            </>
+                          )}
+                        </span>
+                      </td>
+
+                      {/* 삭제 제어 */}
+                      <td className="py-4 px-4 text-center">
+                        <button 
+                          onClick={() => handleDeleteLog(log.id)}
+                          className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-slate-50 rounded-lg transition"
+                          title="일지 항목 삭제"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* 운행 일지 요약 연산 결과 바 */}
+          <div className="mt-6 p-4 bg-slate-50 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4 border border-slate-100">
+            <div className="flex items-center space-x-2 text-xs text-slate-500 font-semibold">
+              <TrendingUp className="w-4 h-4 text-[#fca215]" />
+              <span>실시간 연산 결과: 현재 대장에 등록된 총 반출 횟수는 <strong className="text-slate-800">{todayExportRounds}회</strong>이며, 누적 중량은 <strong className="text-slate-800">{cumulativeTons} 톤</strong> 입니다.</span>
+            </div>
+            
+            <div className="text-xs text-slate-400">
+              * 데이터 유실 방지를 위해 실시간 자동 백업이 지원됩니다.
+            </div>
+          </div>
+
+        </section>
+
+        {/* =========================================================
+            최하단: 통합 송장 / 출차 출력 센터 섹션
+           ========================================================= */}
+        <section className="flex flex-col sm:flex-row items-center justify-between p-6 bg-gradient-to-r from-slate-900 to-slate-800 rounded-3xl text-white shadow-xl shadow-slate-900/10 gap-4">
+          <div className="space-y-1 text-center sm:text-left">
+            <h4 className="text-base font-bold flex items-center justify-center sm:justify-start space-x-2">
+              <Printer className="w-5 h-5 text-amber-400" />
+              <span>송장 및 출차 기록 통합 출력 센터</span>
+            </h4>
+            <p className="text-xs text-slate-400">
+              체크박스에서 인쇄 및 전송할 차량 일지를 선택하신 후 출력 버튼을 눌러주세요.
+            </p>
+          </div>
+
+          <div className="flex space-x-2 w-full sm:w-auto">
+            <button
+              onClick={() => {
+                if (selectedLogs.length === 0) {
+                  alert("출력할 운행 내역을 왼쪽 표에서 최소 1개 이상 체크해 주세요.");
+                  return;
+                }
+                setIsPrintModalOpen(true);
+              }}
+              className="flex-1 sm:flex-initial bg-gradient-to-r from-[#fca215] to-amber-500 hover:from-amber-500 hover:to-amber-600 text-slate-950 font-black px-6 py-3 rounded-2xl text-sm flex items-center justify-center space-x-2 transition duration-200 shadow-md shadow-amber-500/10"
+            >
+              <Printer className="w-4 h-4 stroke-[2.5]" />
+              <span>선택 송장 / 출차 목록 출력하기 ({selectedLogs.length}건)</span>
+            </button>
+          </div>
+        </section>
+
+      </main>
+
+      {/* =========================================================
+          인쇄 및 송장 출력 프레젠테이션 모달
+         ========================================================= */}
+      {isPrintModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl relative animate-in fade-in zoom-in duration-150">
+            
+            <button 
+              onClick={() => setIsPrintModalOpen(false)}
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="mb-6 pb-4 border-b border-dashed border-slate-200">
+              <div className="flex items-center space-x-2 text-[#fca215] mb-1">
+                <Truck className="w-5 h-5" />
+                <span className="text-xs font-black uppercase tracking-wider">현장 반출 보증서</span>
+              </div>
+              <h3 className="text-xl font-black text-slate-900">사토 반출 대장 증명서</h3>
+              <p className="text-xs text-slate-400">발행 일시: {new Date().toLocaleString()}</p>
+            </div>
+
+            <div className="space-y-4 max-h-[350px] overflow-y-auto pr-2">
+              {logs.filter(l => selectedLogs.includes(l.id)).map((item, idx) => (
+                <div key={item.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex justify-between items-start">
+                  <div>
+                    <div className="flex items-center space-x-2 mb-2">
+                      <span className="bg-slate-900 text-white font-bold text-xs px-2 py-0.5 rounded">
+                        No. {idx + 1}
+                      </span>
+                      <strong className="text-slate-800 text-sm font-bold">{item.plateNumber}</strong>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-500">
+                      <p>출차 시각: <strong className="text-slate-700">{item.time}</strong></p>
+                      <p>운행 기사: <strong className="text-slate-700">{item.driverName}</strong></p>
+                      <p>반출 성상: <strong className="text-slate-700">{item.material}</strong></p>
+                      <p>송장 상태: <strong className={item.invoiceAttached ? 'text-emerald-600' : 'text-rose-500'}>
+                        {item.invoiceAttached ? '확인 필' : '송장 무부착'}
+                      </strong></p>
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <p className="text-xs text-slate-400 font-semibold">반출 톤수</p>
+                    <p className="text-lg font-black text-slate-900">{item.weight} 톤</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-6 p-4 bg-amber-50 rounded-2xl border border-amber-100 flex justify-between items-center text-sm font-bold">
+              <span className="text-slate-700">인쇄 대상 총계 ({selectedLogs.length}건) :</span>
+              <span className="text-lg font-black text-[#fca215]">
+                {logs.filter(l => selectedLogs.includes(l.id)).reduce((sum, current) => sum + current.weight, 0).toFixed(1)} 톤
+              </span>
+            </div>
+
+            <div className="mt-6 flex space-x-2 justify-end">
+              <button 
+                onClick={() => setIsPrintModalOpen(false)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-bold hover:bg-slate-50 transition"
+              >
+                닫기
+              </button>
+              <button 
+                onClick={() => {
+                  window.print();
+                }}
+                className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold flex items-center space-x-1 transition"
+              >
+                <Printer className="w-4 h-4" />
+                <span>지금 인쇄하기</span>
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* 맞춤형 스크롤바 커스텀 스타일 정의 */}
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          height: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: #f1f5f9;
+          border-radius: 999px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #cbd5e1;
+          border-radius: 999px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #94a3b8;
+        }
+      `}</style>
+
+    </div>
+  );
+}
+
